@@ -1,0 +1,472 @@
+---
+title: "Cnemaspis Analysis"
+author: "Arka Pal"
+date: "2023-08-01"
+output:
+  html_notebook: default
+  html_document:
+    df_print: paged
+---
+
+This notebook includes all statistical analyses and figures corresponding to the manuscript.
+
+```{r setup, include=F}
+knitr::opts_chunk$set(cache = T, echo = F)
+knitr::opts_knit$set(root.dir = "~/Projects/2015-Cnemaspis/")
+```
+
+```{r Load libraries, include=F}
+#rm(list=ls())
+#libs <- c("tidyverse", "gridExtra", "knitr", "glmmADMB", "multcomp")
+#install.packages(setdiff(libs,installed.packages()))
+#lapply(libs, require, character.only=T)
+
+#install.packages("glmmADMB", repos = "http://R-Forge.R-project.org") ### WRONG repo link
+#install.packages("glmmADMB", repos = "http://glmmadmb.r-forge.r-project.org/repos") ### CORRECT repo link
+
+library(tidyverse)
+library(gridExtra)
+library(glmmADMB)
+library(multcomp)
+library(lme4)
+library(car) #for significance testing (anova)
+library(performance)
+
+my_geom_theme <- theme_bw() + theme(panel.grid = element_blank())
+```
+
+## 1. Variation in ectoparasite levels
+```{r load-morphoData}
+morph <- read.csv("./analysis/datasets/MorphologyDataNew.csv", header = T, stringsAsFactors = T)
+morph$Month <- as.factor(morph$Month)
+str(morph) #exploring data
+```
+
+```{r subset high-density}
+## Subset lizards from only high-density plots
+morph_highDen <- morph %>% filter(Plot_type == "H" & LizardType != "W")
+## subset only specific morphs
+morph_highDen_Ymales <- morph_highDen %>% filter(LizardType == "Y")
+morph_highDen_females <- morph_highDen %>% filter(LizardType == "F")
+```
+
+```{r figS1, fig.width=4, fig.height=4, fig.align='center', echo=T, results='markup'}
+#### Distribution of parasite count
+#figs1
+hist(morph_highDen$Parasites, xlab="Ectoparasite Level", ylab="Frequency", main="Distribution of parasite count", breaks = 40)
+#data is zero biased, so using glmmadmb package
+
+#### Test for normality
+shapiro.test(morph_highDen$Parasites)
+```
+Fig S1: Histogram of ectoparasite level
+<br/>
+
+## 2. Measuring body condition 
+
+#### Calculate body condition as scaled mass index (SMI)
+```{r SMI_Ymales, echo=T, results='markup'}
+## Males
+# Population mean SVL
+meanSVL_yM <- mean(morph_highDen_Ymales$SVL)
+# Linear regression of log transformed mass by SVL
+lm_yM <- lm(log(SVL)~log(Mass), morph_highDen_Ymales)
+summary(lm_yM)
+```
+
+```{r SMI_Ymales_data}
+slope_yM <- 0.05094
+morph_highDen_Ymales$SMI <- morph_highDen_Ymales$Mass*(meanSVL_yM/morph_highDen_Ymales$SVL)^slope_yM
+```
+
+```{r SMI_females, echo=T, results='markup'}
+## Females
+# Population mean SVL
+meanSVL_F <- mean(morph_highDen_females$SVL)
+# Linear regression of log transformed mass by SVL
+lm_F <- lm(log(SVL)~log(Mass), morph_highDen_females)
+summary(lm_F)
+```
+```{r SMI_females_data}
+slope_F <- 0.11503
+morph_highDen_females$SMI <- morph_highDen_females$Mass*(meanSVL_F/morph_highDen_females$SVL)^slope_F
+```
+
+```{r SMI_data}
+## Merge the male and female files 
+morph_highDen <- rbind(morph_highDen_Ymales, morph_highDen_females)
+str(morph_highDen)
+```
+
+## 3. Relationship between ectoparasites and body condition
+
+```{r fig1, fig.height=4, fig.width=4, echo=F}
+fig1 <- ggplot (morph_highDen, aes(x=Parasites, y=SMI, fill=LizardType)) +
+  geom_point(shape=1, size=1, alpha=1, aes(colour=LizardType)) +
+  geom_smooth(method='glm', fullrange = TRUE, se=TRUE, level=0.95, span=1, aes(colour=LizardType)) +
+  labs(y="Body Condition (Scaled Mass Index)", x="Ectoparasite Level") + my_geom_theme +
+  theme(legend.position = c(0.8,0.8), legend.direction = "vertical", legend.title = element_blank()) + 
+  #ylim(-2,25) +
+  scale_color_manual(labels=c("Females","Males"), values = c("grey30","gold3")) +
+  scale_fill_manual(labels=c("Females","Males"), values = c("grey30","gold3"))
+
+fig1
+```
+Fig1. Ectoparasite Level vs Body Condition 
+
+<br/>
+```{r figS2, fig.height=3, fig.width=6, echo=F}
+## fig S2a
+figS2a <- ggplot(morph_highDen, aes(x=LizardType, y=Parasites, fill=LizardType)) +
+  geom_boxplot(size=1) +
+  scale_x_discrete(labels=c("Female","Male")) +
+  labs(x="Sex",y="Ectoparasite Level") +
+  my_geom_theme + theme(legend.position="none") + ylim(-1,25) +
+  scale_fill_manual(values = c("grey60","gold3"))
+
+
+## fig S2b
+months <- c("Sep","Oct","Nov","Dec","Jan","Feb","Mar")
+
+figS2b <- ggplot(morph_highDen, aes(x=Month, y=Parasites)) + 
+  geom_boxplot(size=1) +
+  scale_x_discrete(labels=c("Sep","Oct", "Nov", "Dec", "Jan", "Feb", "Mar")) +
+  labs(x="Months", y="") +
+  my_geom_theme +
+  ylim(-1,25)
+
+grid.arrange(figS2a, figS2b, widths=c(0.35,1), nrow=1)
+```
+FigS2. Ectoparasite level across sex and months. 
+
+
+<br/>
+<br/>
+
+#### Table S1
+```{r TableS1: Model for Body Condition, warning=F, echo=TRUE, results='markup'}
+ParVarMod <-  glmmadmb(Parasites ~ LizardType * SMI + Month,
+                       random = ~1|PlotID , 
+                       family = "poisson", 
+                       zeroInflation = T,
+                       data = morph_highDen)
+summary(ParVarMod)
+```
+
+```{r}
+## Check with lme4 package
+ParVarMod_lme4 <- glmer(Parasites ~ LizardType * SMI + Month + (1|PlotID),
+                        family = "poisson",
+                        data = morph_highDen
+                      )
+  
+summary(ParVarMod_lme4)
+```
+
+
+<br/>
+<br/>
+
+#### Table S2
+```{r TableS2: Models for subsampled data, echo=T, results='markup', warning=F}
+## ParVarMod with alternate months - 1,3,5,7 to reduce replicate sampling
+morph_highDen_altMonth1 <- morph_highDen %>% filter(Month %in% c(1,3,5,7)) 
+
+ParVarMod_altMonth1 <- glmmadmb(Parasites ~ LizardType * SMI + Month,
+                       random = ~1|PlotID , 
+                       family = "poisson", 
+                       zeroInflation = T,
+                       data = morph_highDen_altMonth1)
+summary(ParVarMod_altMonth1)
+
+## ParVarMod with alternate months - 2,4,6
+morph_highDen_altMonth2 <- morph_highDen %>% filter(Month %in% c(2,4,6)) 
+
+ParVarMod_altMonth2 <- glmmadmb(Parasites ~ LizardType * SMI + Month,
+                       random = ~1|PlotID , 
+                       family = "poisson", 
+                       zeroInflation = T,
+                       data = morph_highDen_altMonth2)
+summary(ParVarMod_altMonth2)
+```
+<br/>
+
+### 3. Relationship between ectoparasites and visual signals
+<br/>
+```{r load-visualData}
+##### Visual Colour Analysis
+visual <- read.csv("/Users/apal/Projects/2015-Cnemaspis/analysis/datasets/visual_2023-05.csv", header=TRUE)
+visual$PlotID_short <- as.factor(visual$PlotID_short)
+str(visual)
+```
+
+```{r fig2, fig.height=4, fig.width=6}
+fig2A <- ggplot (visual, aes(x=Parasites, y=Brightness)) +
+    geom_point(shape=1, col="gold3") +
+    labs(x="Ectoparasite Level", y="Brightness") +
+    geom_smooth(method='lm', fullrange = TRUE, se=TRUE, level=0.95, span=1, 
+                color="gold3", fill="gold3") +
+    my_geom_theme
+
+fig2B <- ggplot (visual, aes(x=Parasites, y=Chroma)) +
+    geom_point(shape=1, col="gold3") +
+    labs(x="Ectoparasite Level", y="Chroma") +
+    geom_smooth(method='lm', fullrange = TRUE, se=TRUE, level=0.95, span=1, 
+                color="gold3", fill="gold3") +
+    my_geom_theme
+
+fig2C <- ggplot (visual, aes(x = Parasites, y = Hue)) +
+    geom_point(shape=1, col="gold3") +
+    labs(x="Ectoparasite Level", y="Hue") +
+    geom_smooth(method='lm', fullrange = TRUE, se=TRUE, level=0.95, span=1, 
+                color="gold3", fill="gold3") +
+    my_geom_theme
+
+grid.arrange(fig2A, fig2B, fig2C, ncol=3)
+```
+Fig2. Ectoparasite level vs visual signals
+
+```{r SMI-for-visual-data}
+# Visual mean SVL
+meanSVL_vis <- mean(visual$SVL)
+# Linear regression of log transformed mass by SVL
+lm_vis <- lm(log(SVL)~log(Mass), visual)
+summary(lm_vis)
+slope_vis <- -0.02054
+
+visual$SMI <- visual$Mass*(meanSVL_vis/visual$SVL)^slope_vis
+```
+<br/>
+<br/>
+
+#### Table S3
+```{r Table S3: Models for visual signals, echo=T, warning=F, results='markup'}
+modBright <- glmer(Brightness ~ Parasites*SMI + (1|PlotID_short), data = visual)
+summary(modBright)
+Anova(modBright)
+
+modChroma <- glmer(Chroma ~ Parasites*SMI + (1|PlotID_short), data = visual)
+summary(modChroma)
+Anova(modChroma)
+
+modHue <- glmer(Hue ~ Parasites*SMI + (1|PlotID_short), data = visual)
+summary(modHue)
+Anova(modHue)
+```
+<br/>
+
+### 3. Relationship between ectoparasites and chemical signals
+<br/>
+```{r load-chemData}
+chemical <- read.csv("./analysis/datasets/chemical_continuous.csv")
+str(chemical)
+```
+<br/>
+
+```{r fig3, fig.height=4, fig.width=4}
+
+##proportion of aromatic compounds wrt ectoparasite load
+fig3A <- ggplot (chemical, aes(x=Parasites, y=X.Aromatic)) +
+    geom_point(shape=1, col="gold3") +
+    labs(x="Ectoparasite Level", y="Aromatic Compounds (%)") +
+    geom_smooth(method='lm', fullrange = TRUE, se=TRUE, level=0.95, span=1, 
+                color="gold3", fill="gold3") +
+    my_geom_theme
+
+##Total no. of compounds wrt ectoparasite load
+fig3B <- ggplot (chemical, aes(x=Parasites, y=X.compounds)) +
+    geom_point(shape=1, col="gold3") +
+    labs(x="Ectoparasite Level", y="Total no. of compounds") +
+    geom_smooth(method='lm', fullrange = TRUE, se=TRUE, level=0.95, span=1, 
+                color="gold3", fill="gold3") +
+    my_geom_theme
+
+grid.arrange(fig3A, fig3B, nrow = 1)
+```
+Fig3. Ectoparasite Levels vs chemical signals
+
+<br/>
+
+```{r figS3, fig.height=4, fig.width=2}
+
+##proportion of aromatic compounds wrt ectoparasite load
+figS3 <- ggplot (chemical, aes(x=Parasites, y=X.Saturated)) +
+    geom_point(shape=1, col="gold3") +
+    labs(x="Ectoparasite Level", y="Saturated Compounds (%)") +
+    geom_smooth(method='lm', fullrange = TRUE, se=TRUE, level=0.95, span=1, 
+                color="gold3", fill="gold3") +
+    my_geom_theme
+
+figS3
+```
+figS3. Ectoparasite Levels vs percentage of saturated chemicals
+
+<br/>
+
+```{r fig S4}
+##proportion of aromatic compounds wrt ectoparasite load
+figS4a <- ggplot(subset(chemical, Parasites < 30), aes(x=Parasites, y=X.Aromatic)) +
+    geom_point(shape=1, col="gold3") +
+    labs(x="Ectoparasite Level", y="Aromatic Compounds (%)") +
+    geom_smooth(method='lm', fullrange = TRUE, se=TRUE, level=0.95, span=1, 
+                color="gold3", fill="gold3") +
+    my_geom_theme
+
+##proportion of saturated compounds wrt ectoparasite load
+figS4b <- ggplot (subset(chemical, Parasites < 30), aes(x=Parasites, y=X.Saturated)) +
+    labs(x="Ectoparasite Level", y="Saturated Compounds (%)") +
+    geom_point(shape=1, col="gold3") +
+    geom_smooth(method='lm', fullrange = TRUE, se=TRUE, level=0.95, span=1, 
+                color="gold3", fill="gold3") +
+    my_geom_theme
+
+##Total no. of compounds wrt ectoparasite load
+figS4c <- ggplot (subset(chemical, Parasites < 30), aes(x=Parasites, y=X.compounds)) +
+    geom_point(shape=1, col="gold3") +
+    labs(x="Ectoparasite Level", y="Total no. of compounds") +
+    geom_smooth(method='lm', fullrange = TRUE, se=TRUE, level=0.95, span=1, 
+                color="gold3", fill="gold3") +
+    my_geom_theme
+
+grid.arrange(figS4a, figS4b, figS4c, nrow = 1)
+```
+
+FigS3. Ectoparasite Levels vs percentage of saturated chemicals (without outliers)
+
+
+#### Table S5
+```{r Table S5: Models for chemical signals, echo=T, warning=F, error=F, results='markup'}
+# % aromatic compounds as a function of parasite level:
+aroma <- glmer(X.Aromatic ~ Parasites + (1|SMI), data = chemical)
+summary(aroma)
+Anova(aroma)
+
+# % saturated compounds as a function of parasite level:
+sat <- glmer(X.Saturated ~ Parasites + (1|SMI), data = chemical)
+summary(sat)
+Anova(sat)
+
+# number of compounds as a function of parasite level:
+comp <- glmer(X.compounds ~ Parasites + (1|SMI), data = chemical)
+summary(comp)
+Anova(comp)
+```
+
+#### Table S6
+```{r Table S6: Models for chemical signals w/o outliers, echo=T, warning=F, error=F, results='markup'}
+# % aromatic compounds as a function of parasite level:
+aroma <- glmer(X.Aromatic ~ Parasites + (1|SMI), data = subset(chemical, Parasites < 30))
+summary(aroma)
+Anova(aroma)
+
+# % saturated compounds as a function of parasite level:
+sat <- glmer(X.Saturated ~ Parasites + (1|SMI), data = subset(chemical, Parasites < 30))
+summary(sat)
+Anova(sat)
+ 
+# number of compounds as a function of parasite level:
+comp <- glmer(X.compounds ~ Parasites + (1|SMI), data = subset(chemical, Parasites < 30))
+summary(comp)
+Anova(comp)
+```
+
+<br/>
+
+### 4. Behavioural Analysis with visual and chemical signals
+
+<br/>
+```{r}
+behav <- read.csv("./analysis/datasets/BehavioralData_sequential.csv", header=TRUE)
+behav$Signal <- as.factor(behav$Signal)
+behav$Treatment <- as.factor (behav$Treatment)
+behav$FemaleID <- as.factor(behav$FemaleID)
+
+str(behav)
+```
+<br/>
+
+#### Table S7 (Visual)
+```{r}
+#hist(behav$RelFlick)
+visFlick <- glmmadmb(abs(RelFlick)~Treatment, random = ~1|FemaleID, family="poisson", data=subset(behav, Signal=="Visual"))
+summary (visFlick)
+summary (glht(visFlick, linfct=mcp(Treatment="Tukey")))
+```
+
+```{r}
+visMov <- glmmadmb(abs(RelMov)~Treatment, random=~1|FemaleID, family="poisson", data=subset(behav, Signal=="Visual"))
+summary (visMov)
+summary (glht(visMov, linfct=mcp(Treatment="Tukey")))
+```
+
+
+<br/>
+
+#### Table S7 (Chemical)
+```{r}
+chemFlick <- glmmadmb(abs(RelFlick)~Treatment, random=~1|FemaleID, family="poisson", data=subset(behav, Signal=="Chemical"))
+summary (chemFlick)
+summary (glht(chemFlick, linfct=mcp(Treatment="Tukey")))
+```
+
+```{r}
+chemMov <- glmmadmb(abs(RelMov)~Treatment, random=~1|FemaleID, family="poisson", data=subset(behav, Signal=="Chemical"))
+summary (chemMov)
+summary (glht(chemMov, linfct=mcp(Treatment="Tukey")))
+```
+
+
+#### Figure 4
+```{r fig4}
+plot_visFlick <- ggplot (subset(behav, Signal == "Visual"), aes(x=Treatment, y=RelFlick)) +
+  geom_boxplot (size = 0.5, fill = "turquoise") +  geom_jitter (width = 0.1, shape = 21) +
+  ylim (-7,10) + labs (x="", y="Relative Tongue Flicks", title = "Visual Signals") +
+  scale_x_discrete (labels=c("Control 1", "Control 2", "Test")) +
+  geom_hline(yintercept=0, linetype=2) + my_geom_theme + theme(plot.title = element_text(hjust = 0.5))
+
+plot_chemFlick <- ggplot (subset(behav, Signal == "Chemical"), aes(x=Treatment, y=RelFlick)) +
+  geom_boxplot (size = 0.5, fill = "indianred") +
+  geom_jitter (width = 0.1, shape = 21) +
+  ylim (-7,10) + 
+  labs (x="", y="Relative Tongue Flicks", title = "Chemical Signals") +
+  scale_x_discrete (labels=c("Control 1", "Control 2", "Test")) +
+  geom_hline(yintercept=0, linetype=2) +
+  my_geom_theme + theme(plot.title = element_text(hjust = 0.5))
+
+plot_visApp <- ggplot (subset(behav, Signal == "Visual"), aes(x=Treatment, y=RelApp)) +
+  geom_boxplot (size =  0.5, fill = "turquoise") +
+  geom_jitter (width = 0.1, shape = 21) +
+  ylim (-7,10) + 
+  labs (x="Treatments", y="Relative Approach") +
+  scale_x_discrete (labels=c("Control 1", "Control 2", "Test")) +
+  geom_hline(yintercept=0, linetype=2) +
+  my_geom_theme
+
+plot_chemMov <- ggplot (subset(behav, Signal == "Chemical"), aes(x=Treatment, y=RelMov)) +
+  geom_boxplot (size = 0.5, fill = "indianred") +
+  geom_jitter (width = 0.1, shape = 21) +
+  ylim (-7,10) + 
+  labs (x="Treatments", y="Relative Movement") +
+  scale_x_discrete (labels=c("Control 1", "Control 2", "Test")) +
+  geom_hline(yintercept=0, linetype=2) +
+  my_geom_theme
+
+grid.arrange(plot_visFlick, plot_chemFlick, plot_visApp, plot_chemMov)
+```
+
+<br/>
+
+### Simultaneous Behavioural Analysis with only chemical signals
+
+<br/>
+```{r}
+behav_sim <- read.csv("analysis/datasets/BehavioralData_simultaneous.csv", header = T)
+str(behav_sim)
+```
+
+#### Figure 5
+```{r fig5}
+ggplot(behav_sim, aes(fill=choice, x=type, y=count)) + geom_bar(position = "stack", stat="identity") +
+  coord_flip() +theme_light()
+```
+
